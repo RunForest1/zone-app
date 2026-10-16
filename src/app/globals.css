@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* Тёплая светлая палитра.
+   Структура токенов повторяет lunar-zone.ru (уровни поверхностей, границ,
+   текста и радиусов), но оттенки — тёплые. Менять оформление можно здесь. */
+@theme {
+    --color-background: #faf8f4; /* фон страницы */
+    --color-surface: #ffffff; /* карточки и панели */
+    --color-surface-muted: #f4eee6; /* вложенные поверхности и ховер */
+    --color-foreground: #2b2621; /* основной текст */
+    --color-muted: #7c7268; /* вторичный текст */
+    --color-faint: #a89e92; /* третичный текст */
+    --color-line: #ebe3d8; /* границы */
+    --color-line-strong: #dbd0c0; /* границы заметнее */
+    --color-accent: #b06a37; /* акцент: ссылки, активные элементы */
+    --color-accent-soft: #f8e9d7; /* подложка акцента */
+
+    --shadow-card:
+        0 1px 2px rgba(72, 54, 34, 0.06), 0 2px 8px rgba(72, 54, 34, 0.05);
+
+    --font-sans: var(--font-geist-sans);
+    --font-mono: var(--font-geist-mono);
+}
+
+body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+}
