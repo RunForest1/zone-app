@@ -13,6 +13,9 @@ RUN bun install --frozen-lockfile
 FROM oven/bun:1 AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
+# public может отсутствовать: в git пустой каталог не хранится,
+# а COPY в web-таргете требует его наличия.
+RUN mkdir -p public
 COPY . .
 # Prisma-клиент нужен и сборке (типы), и рантайму.
 RUN bunx prisma generate
