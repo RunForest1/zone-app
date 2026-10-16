@@ -1,0 +1,76 @@
+// Схема БД: сделки, отслеживаемые предметы, состояние и лог синхронизации.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Предмет, за которым следит воркер (появляется при открытии карточки).
+model TrackedItem {
+  id        String   @id
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales Sale[]
+  sync  ItemSync?
+}
+
+// Состояние синхронизации предмета.
+model ItemSync {
+  itemId String      @id
+  item   TrackedItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  // Когда сделан разовый backfill истории.
+  backfilledAt DateTime?
+  // Когда последний раз успешно синхронизировали.
+  lastSyncedAt DateTime?
+  // Время самой свежей сделки в базе (с него продолжаем дописывание).
+  lastSaleTime DateTime?
+  // Текст последней ошибки (если была).
+  lastError String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Совершённая сделка.
+model Sale {
+  id     BigInt      @id @default(autoincrement())
+  itemId String
+  item   TrackedItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  time   DateTime
+  price  BigInt
+  amount Int      @default(1)
+  // Качество и точка предмета (у части предметов их нет).
+  quality Int?
+  point   Int?
+
+  // Ключ дедупликации: одинаковые сделки из API не задваиваются.
+  key String @unique
+
+  createdAt DateTime @default(now())
+
+  @@index([itemId, time])
+}
+
+// Журнал синхронизаций (по предмету и по всему прогону воркера).
+model SyncLog {
+  id     BigInt  @id @default(autoincrement())
+  itemId String?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  // ok | error
+  status String
+  // Сколько сделок добавлено.
+  added Int     @default(0)
+  // Сообщение об ошибке или пояснение.
+  message String?
+
+  @@index([startedAt])
+}

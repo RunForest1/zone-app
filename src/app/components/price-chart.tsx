@@ -60,7 +60,7 @@ export function PriceChart({ points }: { points: SeriesPoint[] }) {
   if (points.length === 0) {
     return (
       <p className="py-10 text-center text-sm text-muted">
-        За этот период сделок нет
+        За этот период сделок нет · историю пополняет воркер (раз в 5 минут)
       </p>
     );
   }

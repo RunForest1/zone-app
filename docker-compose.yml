@@ -1,0 +1,108 @@
+# Данные Postgres — именованный volume (переживает пересоздание контейнеров).
+volumes:
+  db-data:
+
+# Единый источник правды по базе: POSTGRES_* из .env.
+# DATABASE_URL собирается здесь и его не нужно синхронизировать вручную.
+x-database-url: &database-url "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+
+services:
+  # ---------- PostgreSQL ----------
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # Только на localhost: удобно подключаться с хоста (psql, клиент, `bun dev`).
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      # Проверяем не только «сервер отвечает», но и что пароль рабочий:
+      # по TCP, иначе локальные подключения идут по trust и ошибка не видна.
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB && PGPASSWORD=$$POSTGRES_PASSWORD psql -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB -c 'SELECT 1' >/dev/null",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- миграции ----------
+  # Одноразовый сервис: применяет миграции до старта web и worker.
+  # restart: "no" — контейнер должен отработать и завершиться, а не
+  # перезапускаться по кругу (иначе migrate: deploy выполнялся бы бесконечно).
+  migrate:
+    build:
+      context: .
+      target: worker
+    command: ["bunx", "prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- приложение ----------
+  web:
+    build:
+      context: .
+      target: web
+    environment:
+      DATABASE_URL: *database-url
+      CLIENT_ID: ${CLIENT_ID}
+      CLIENT_SECRET: ${CLIENT_SECRET}
+      DOMAIN: ${DOMAIN}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------- фоновый воркер ----------
+  worker:
+    build:
+      context: .
+      target: worker
+    command: ["bun", "src/worker/index.ts"]
+    environment:
+      DATABASE_URL: *database-url
+      CLIENT_ID: ${CLIENT_ID}
+      CLIENT_SECRET: ${CLIENT_SECRET}
+      WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS:-300000}
+      WORKER_BACKFILL_DAYS: ${WORKER_BACKFILL_DAYS:-30}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

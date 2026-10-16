@@ -19,6 +19,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - TypeScript
 - Tailwind CSS 4
 - Turbopack + React Compiler
+- PostgreSQL + Prisma (постоянное хранилище истории сделок)
+- Docker Compose (db, migrate, web, worker)
 - Данные — локальная база `src/lib/stalzone-database-main/ru` (json-файлы)
 - Аукцион — внешний API `https://eapi.stalzone.com` (см. «API аукциона»)
 
@@ -28,6 +30,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 bun dev      # сервер разработки
 bun build    # production-сборка
 bun start    # запуск production-сборки
+bun worker   # фоновый воркер синхронизации истории
+bun migrate  # применить миграции (prisma migrate deploy)
 ```
 
 ## Структура
@@ -38,6 +42,8 @@ src/
 │   ├── layout.tsx              # корневой layout: шапка, контейнер, подвал
 │   ├── page.tsx                # каталог (/)
 │   ├── items/[id]/page.tsx     # детальная страница предмета (/items/<id>)
+│   ├── actions.ts              # серверный экшен: пометить предмет отслеживаемым
+│   ├── api/health/route.ts     # healthcheck (проверяет доступность БД)
 │   ├── icons/[...path]/route.ts# отдача иконок из базы (/icons/<категория>/<id>.png)
 │   ├── globals.css             # глобальные стили и палитра (тёплая светлая тема)
 │   └── components/             # компоненты интерфейса
@@ -65,7 +71,18 @@ src/
     │   ├── market.ts           # фильтры и статистика по сделкам
     │   ├── quality.ts          # названия и цвета качества (qlt, 0–5)
     │   └── period.ts           # периоды истории (7/14/30) и разбор ?days=
+    ├── db/
+    │   ├── index.ts            # Prisma-клиент (singleton)
+    │   └── sales.ts            # чтение/запись сделок, отметка предмета
     └── format.ts               # форматирование цены и даты
+└── worker/
+    └── index.ts                # фоновый воркер синхронизации истории
+```
+
+```txt
+prisma/
+├── schema.prisma               # таблицы: сделки, состояние и лог синхронизации
+└── migrations/                 # миграции (применяет сервис migrate)
 ```
 
 ## Архитектура
@@ -99,7 +116,7 @@ src/
   (`.env`; для секрета поддерживается и старое имя `SZ_API_TOKEN`). Если их нет,
   возвращает `null`, и блоки на странице показывают заглушку.
 - `getLots` постранично добирает все активные лоты (страница — 200, ограничение 600),
-  `getHistory` — сделки за последние 30 дней (ограничение 1200 точек).
+  `getHistory` — все сделки за период (пачки по 6 страниц, не больше 30 страниц).
 - Параметры API: `limit` (макс. 200, по умолчанию 20), `offset`, `additional`;
   у лотов ещё `sort` и `order` (в клиенте не используются — сортировка в интерфейсе).
 - `additional: true` (в клиенте включён) даёт дополнительные поля по лоту/сделке:
@@ -119,6 +136,45 @@ src/
   а смена фильтра — мгновенная (фильтрация уже готовых данных в памяти).
 - `ItemHistory` и `ItemLots` — раздельные Suspense-блоки: лоты (один запрос)
   показываются раньше истории (у «горячих» предметов это десятки страниц).
+- `loadHistory` **читает историю из PostgreSQL**, а не из API: страница в API
+  не ходит. `loadLots` — как и раньше из API (лоты в БД не сохраняются).
+- `ensureHistory(itemId)` — ленивый backfill: при первом открытии карточки
+  история за `BACKFILL_DAYS` (30) дней сразу тянется из API, кладётся в БД
+  и показывается — ждать воркера не нужно. Дальше историю дописывает воркер.
+  Вызывается после `connection()`: внутри есть `Date.now()` и запись в БД.
+
+### База данных и воркер
+
+- Схема (`prisma/schema.prisma`): `TrackedItem` (за кем следим),
+  `ItemSync` (состояние синхронизации: `backfilledAt`, `lastSyncedAt`,
+  `lastSaleTime`, `lastError`), `Sale` (сделки: время, цена, количество,
+  качество, точка и ключ дедупликации `key`), `SyncLog` (журнал прогонов).
+- Миграция — `prisma/migrations/20251015000000_init`; применяется командой
+  `bun migrate` (`prisma migrate deploy`) или сервисом `migrate` в compose.
+- `src/lib/db/index.ts` — Prisma-клиент как singleton (`globalThis` в dev).
+- `src/lib/db/sales.ts` — `readSales`, `saveSales` (вставка пачками по 1000,
+  дубликаты пропускаются), `latestSaleTime`, `trackItem`.
+- `src/app/actions.ts` — серверный экшен `trackItem`: при открытии карточки
+  помечает предмет отслеживаемым (`ItemHistory` зовёт его после `connection()`).
+- `src/worker/index.ts` — воркер: раз в `WORKER_INTERVAL_MS` (по умолчанию
+  5 минут) обходит отслеживаемые предметы; при первом появлении предмета
+  делает разовый backfill за `WORKER_BACKFILL_DAYS` (30) дней, дальше
+  дописывает только новое (начиная с последней сохранённой сделки).
+  Если выборка упёрлась в лимит страниц (`complete: false`), `backfilledAt`
+  не ставится и `lastSaleTime` не сдвигается — backfill повторится на
+  следующем прогоне (дубликаты отсекает `key`). Ошибки по предмету пишутся
+  в `SyncLog` и `ItemSync.lastError` и не останавливают цикл; SIGTERM/SIGINT —
+  корректное завершение (дожидается текущего предмета, закрывает Prisma).
+- `src/app/api/health/route.ts` — healthcheck: `SELECT 1` в БД (`await connection()`,
+  чтобы роут не закэшировался на сборке).
+- Переменные окружения: `DATABASE_URL`, `CLIENT_ID`, `CLIENT_SECRET`, `DOMAIN`,
+  `WORKER_INTERVAL_MS`, `WORKER_BACKFILL_DAYS` (см. `.env.example`).
+  `.env` в репозиторий не коммитится (он в `.gitignore`).
+- Docker: `Dockerfile` — multi-stage с target-ами `web` (standalone) и `worker`;
+  `docker-compose.yml` — `db` (Postgres + именованный volume `db-data`),
+  `migrate` (одноразовый, применяет миграции до старта), `web`, `worker`;
+  у сервисов `restart: unless-stopped` (кроме `migrate`), healthcheck и
+  ротация логов (`json-file`, 10 МБ × 3). Запуск: `docker compose up -d --build`.
 
 ### Серверное и клиентское
 
@@ -137,7 +193,8 @@ src/
 - Детальная страница (`app/items/[id]/page.tsx`) — серверный компонент,
   читает предмет по `id` (иначе `notFound()`), показывает иконку, категорию
   и ранг (окрашенный цветом ранга). Характеристик на странице нет — только
-  «История продаж» и «Текущий аукцион» (`ItemMarket`). Обращение к `params`
+  «История продаж» (`ItemHistory`) и «Текущий аукцион» (`ItemLots`), каждый
+  в своём `<Suspense>`. Обращение к `params`
   обёрнуто в `<Suspense>` — иначе dev-валидация «мгновенной навигации» ругается
   (см. /docs/messages/instant-shell-url-data).
 - `ItemMarket` (серверный) тянет лоты и историю за выбранный период, дальше
@@ -150,6 +207,10 @@ src/
   **совершённым сделкам** за выбранный период (и с учётом фильтров качества/точки),
   последняя сделка — из истории, мин. предложение — минимальный выкуп активных
   лотов, прибыль = средняя − мин. предложение, маржа = прибыль / средняя × 100.
+- Фильтры качества и точки показываются, только если признак есть в данных,
+  но значения перечисляются полным диапазоном: заточка 0–15, качество 0–5
+  (`featureRange` в `@/lib/auction/market`), чтобы варианты не «пропадали»,
+  когда по какому-то значению пока не было сделок или лотов.
 - Фильтры рынка — период (7/14/30 дней) и качество/точка — берутся из адреса
   (`?days=&qlt=&ptn=`): ссылки-«чипы» лежат в `MarketView`, разбор —
   `parsePeriod`/`parseFeature`, сборка адреса — `marketHref` (`@/lib/auction/period`).

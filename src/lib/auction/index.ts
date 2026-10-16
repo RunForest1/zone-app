@@ -10,11 +10,16 @@ const PAGE_SIZE = 200;
 // Верхняя граница лотов, чтобы страница не тянула слишком много.
 const LOTS_LIMIT = 600;
 
-// Сколько страниц истории максимум тянем и по сколько параллельно.
-// 30 страниц = 6000 сделок: у очень «горячих» предметов это меньше
-// запрошенного периода, и тогда UI честно показывает покрытый промежуток.
-const HISTORY_PAGES = 30;
+// Сколько страниц тянем при разовом backfill и при дописывании новых сделок,
+// и по сколько страниц параллельно.
+// 200 страниц = 40 000 сделок: с запасом хватает на 30 дней даже
+// «горячим» предметам.
+export const BACKFILL_PAGES = 200;
+export const INCREMENT_PAGES = 50;
 const HISTORY_BATCH = 6;
+
+// Глубина истории, которая нужна приложению (дней).
+export const BACKFILL_DAYS = 30;
 
 // Дополнительные сведения о лоте/сделке.
 export interface LotAdditional {
@@ -86,18 +91,16 @@ export class SZApi {
     return lots;
   }
 
-  // История цен за последние `days` дней от времени `now`.
-  // Окно закрываем полностью (страницы тянем пачками), поэтому период
-  // не обрезается даже у «горячих» предметов с тысячами сделок.
+  // Сделки начиная с момента `since`. Тянем страницами, но не больше `maxPages`
+  // (защита от бесконечного обхода).
   // Первая страница идёт с доп. полями: по ней видно, есть ли у предмета
   // качество/точка. Если их нет — остальное тянем без них (меньше трафика).
-  // Возвращаем хронологически: сначала старые сделки, потом свежие.
-  async getHistory(
+  // Возвращаем сделки хронологически и признак, что диапазон покрыт целиком.
+  async getHistorySince(
     item: string,
-    days: number,
-    now: number,
-  ): Promise<PricePoint[]> {
-    const since = now - days * 24 * 60 * 60 * 1000;
+    since: number,
+    maxPages = INCREMENT_PAGES,
+  ): Promise<{ points: PricePoint[]; complete: boolean }> {
     const first = await this.historyPage(item, 0, true);
     const collected: PricePoint[] = [...first.items];
     const withFeatures = first.items.some(
@@ -106,18 +109,14 @@ export class SZApi {
         typeof point.additional?.ptn === "number",
     );
 
-    let done = this.reachedEnd(first.items, since);
+    let complete = this.reachedEnd(first.items, since);
 
-    for (
-      let start = 1;
-      start < HISTORY_PAGES && !done;
-      start += HISTORY_BATCH
-    ) {
+    for (let start = 1; start < maxPages && !complete; start += HISTORY_BATCH) {
       const requests: Array<Promise<{ items: PricePoint[] }>> = [];
 
       for (
         let i = start;
-        i < Math.min(start + HISTORY_BATCH, HISTORY_PAGES);
+        i < Math.min(start + HISTORY_BATCH, maxPages);
         i += 1
       ) {
         requests.push(this.historyPage(item, i * PAGE_SIZE, withFeatures));
@@ -129,14 +128,16 @@ export class SZApi {
         collected.push(...page.items);
 
         if (this.reachedEnd(page.items, since)) {
-          done = true;
+          complete = true;
         }
       }
     }
 
-    return collected
+    const points = collected
       .filter((point) => new Date(point.time).getTime() >= since)
       .sort((a, b) => a.time.localeCompare(b.time));
+
+    return { points, complete };
   }
 
   // Дошли ли до границы окна на этой странице (значит, дальше тянуть не надо).

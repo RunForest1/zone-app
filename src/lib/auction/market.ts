@@ -15,6 +15,16 @@ export function featureValue(entry: Entry, key: "qlt" | "ptn"): string {
   return key === "ptn" ? "0" : "";
 }
 
+// Полные диапазоны признаков: заточка 0–15, качество 0–5.
+const FEATURE_RANGES: Record<"qlt" | "ptn", number> = { qlt: 6, ptn: 16 };
+
+// Полный список значений признака для фильтра.
+// Так варианты не «пропадают» из списка, если по какому-то значению
+// пока не было сделок или лотов.
+export function featureRange(key: "qlt" | "ptn"): number[] {
+  return Array.from({ length: FEATURE_RANGES[key] }, (_, index) => index);
+}
+
 // Значения признака, которые есть в данных (для фильтра).
 export function availableValues(
   entries: Entry[],

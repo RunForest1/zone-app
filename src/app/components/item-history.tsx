@@ -1,10 +1,17 @@
 import { connection } from "next/server";
+import { trackItem } from "@/app/actions";
 import {
   availableValues,
+  featureRange,
   filterEntries,
   summarize,
 } from "@/lib/auction/market";
-import { loadHistory, loadLots, windowOf } from "@/lib/auction/data";
+import {
+  ensureHistory,
+  loadHistory,
+  loadLots,
+  windowOf,
+} from "@/lib/auction/data";
 import { Placeholder } from "./placeholder";
 import { MarketHistory } from "./market-history";
 
@@ -20,10 +27,29 @@ export async function ItemHistory({
   quality: string;
   point: string;
 }) {
-  // Ждём запрос: после connection() код выполняется только в рантайме,
-  // поэтому Date.now() допустим и окно считается по календарным датам.
+  // Ждём запрос: после connection() код выполняется только в рантайме —
+  // это нужно и для Date.now(), и для записи в БД (Prisma внутри зовёт new Date()
+  // для createdAt/updatedAt, а нестабильные значения в пререндере запрещены).
   await connection();
   const now = Date.now();
+
+  // Открыли карточку — помечаем предмет отслеживаемым, чтобы воркер
+  // подтянул и дальше поддерживал его историю в БД.
+  // Ошибку не глотаем молча: без БД/миграций история не появится,
+  // и причина должна быть видна в логах контейнера web.
+  try {
+    await trackItem(itemId);
+  } catch (error) {
+    console.error("[track] не удалось пометить предмет:", itemId, error);
+  }
+
+  // Если история по предмету ещё не собиралась, забираем её из API прямо
+  // сейчас (за 30 дней) и кладём в БД — страница не ждёт воркера.
+  try {
+    await ensureHistory(itemId);
+  } catch (error) {
+    console.error("[history] не удалось загрузить историю:", itemId, error);
+  }
 
   let lots;
   let points;
@@ -48,9 +74,14 @@ export async function ItemHistory({
     return <Placeholder text="Данных по предмету нет" className="h-72" />;
   }
 
-  // Варианты фильтров берём по всем данным, чтобы список не сужался после выбора.
-  const qualities = availableValues([...lots, ...points], "qlt");
-  const pointValues = availableValues([...lots, ...points], "ptn");
+  // Фильтр показываем, только если признак вообще есть в данных, но значения
+  // перечисляем полным диапазоном (заточка 0–15, качество 0–5), чтобы вариант
+  // не «пропадал» из списка, когда по нему пока не было сделок.
+  const entries = [...lots, ...points];
+  const qualities =
+    availableValues(entries, "qlt").length > 0 ? featureRange("qlt") : [];
+  const pointValues =
+    availableValues(entries, "ptn").length > 0 ? featureRange("ptn") : [];
 
   return (
     <MarketHistory
