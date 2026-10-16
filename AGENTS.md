@@ -165,6 +165,8 @@ prisma/
   следующем прогоне (дубликаты отсекает `key`). Ошибки по предмету пишутся
   в `SyncLog` и `ItemSync.lastError` и не останавливают цикл; SIGTERM/SIGINT —
   корректное завершение (дожидается текущего предмета, закрывает Prisma).
+  В конце каждого прогона воркер чистит старое: сделки и записи `SyncLog`
+  старше `WORKER_RETENTION_DAYS` (35 дней; нужно максимум 30 + запас).
 - `src/app/api/health/route.ts` — healthcheck: `SELECT 1` в БД (`await connection()`,
   чтобы роут не закэшировался на сборке).
 - Переменные окружения: `DATABASE_URL`, `CLIENT_ID`, `CLIENT_SECRET`, `DOMAIN`,

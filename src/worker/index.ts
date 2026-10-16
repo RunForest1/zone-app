@@ -13,6 +13,8 @@ const INTERVAL_MS = Number(process.env.WORKER_INTERVAL_MS ?? 5 * 60 * 1000);
 const BACKFILL_DAYS = Number(
   process.env.WORKER_BACKFILL_DAYS ?? DEFAULT_BACKFILL_DAYS,
 );
+// Сколько дней сделок храним (нужно максимум 30 + запас).
+const RETENTION_DAYS = Number(process.env.WORKER_RETENTION_DAYS ?? 35);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SHUTDOWN_POLL_MS = 200;
 
@@ -137,6 +139,26 @@ async function cycle() {
     }
 
     await syncItem(item.id);
+  }
+
+  await cleanup();
+}
+
+// Чистит старое: странице нужны максимум 30 дней истории, поэтому удаляем
+// сделки (и записи журнала) старше RETENTION_DAYS.
+async function cleanup() {
+  const cutoff = new Date(Date.now() - RETENTION_DAYS * DAY_MS);
+  const sales = await prisma.sale.deleteMany({
+    where: { time: { lt: cutoff } },
+  });
+  const logs = await prisma.syncLog.deleteMany({
+    where: { startedAt: { lt: cutoff } },
+  });
+
+  if (sales.count > 0 || logs.count > 0) {
+    log(
+      `удалено старше ${RETENTION_DAYS} дн: сделок ${sales.count}, записей лога ${logs.count}`,
+    );
   }
 }
 

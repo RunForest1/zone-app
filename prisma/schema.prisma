@@ -55,7 +55,9 @@ model Sale {
 
   createdAt DateTime @default(now())
 
+  // По (itemId, time) читаем период предмета, по time — чистим старое.
   @@index([itemId, time])
+  @@index([time])
 }
 
 // Журнал синхронизаций (по предмету и по всему прогону воркера).
