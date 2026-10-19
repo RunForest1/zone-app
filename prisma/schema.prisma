@@ -94,6 +94,11 @@ model AlertChat {
   categories String[] @default([])
   ranks      String[] @default([])
 
+  // Фильтры по качеству (qlt 0–5) и точке (ptn 0–15) — наборы значений.
+  // Пусто = без ограничения (для артефактов это полный диапазон).
+  qualities Int[] @default([])
+  points    Int[] @default([])
+
   // /pause выключает без удаления настроек.
   active Boolean @default(true)
 
@@ -118,11 +123,10 @@ model AlertEvent {
   profit BigInt
   margin Float?
 
-  // Контекст рынка на момент сделки: средняя цена, медиана и число сделок
-  // за период (как период по умолчанию на сайте).
-  average BigInt?
-  median  BigInt?
-  deals   Int     @default(0)
+  // Цена последней сделки по тому же качеству/точке и рынок за периоды:
+  // массив { days, average, median, deals } (7/14/30 дней).
+  lastPrice BigInt?
+  stats     Json?
 
   // Когда уведомление отправлено (null — в очереди).
   sentAt    DateTime?

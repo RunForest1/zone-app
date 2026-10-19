@@ -1,21 +1,20 @@
 import type { AlertChat } from "@prisma/client";
-import type { AuctionLot } from "@/lib/auction";
-import { estimateProfit } from "@/lib/auction/market";
+import type { FlipEstimate } from "./profit";
 
 // Оценка сделки против фильтров чатов. Чистая функция: ничего не знает
 // ни про Telegram, ни про БД — только решает, кому подходит сделка.
-// Прибыль/маржа считаются той же формулой, что и на странице предмета.
+// Прибыль/маржу считает вызывающий (estimateFlip), здесь — фильтры и пороги.
 
 // Что нужно знать о сделке для проверки фильтров.
 export interface DealInput {
-  // Цена сделки в игровой валюте.
-  price: number;
+  // Качество сделки (у части предметов его нет).
+  quality: number | null;
+  // Точка сделки; отсутствующая считается нулём (как на странице).
+  point: number;
   // Категория предмета (полный путь, например "weapon/assault_rifle").
   category: string;
   // Ранг предмета (значение из RANK_OPTIONS, например "RANK_LEGEND").
   rank: string;
-  // Активные лоты предмета — из них берём минимальное предложение.
-  lots: AuctionLot[];
 }
 
 // Сделка, прошедшая фильтры конкретного чата.
@@ -37,55 +36,87 @@ function normalizedRank(rank: string): string {
   return rank || "DEFAULT";
 }
 
-// Подходит ли сделка фильтрам чата. Возвращает посчитанные прибыль и маржу
-// или null, если сделка не проходит.
-export function matchAlert(deal: DealInput, chat: AlertChat): DealAlert | null {
+// Подходит ли сделка фильтрам чата (активность, качество, точка, раздел, ранг).
+// Пустой список = без ограничения; отсутствующее качество под непустой
+// список качеств не подходит.
+export function matchFilters(deal: DealInput, chat: AlertChat): boolean {
   if (!chat.active) {
-    return null;
+    return false;
   }
 
-  const { profit, margin } = estimateProfit(deal.price, deal.lots);
-
-  // Нет активных лотов — оценить прибыль нельзя, не шлём.
-  if (profit === null) {
-    return null;
+  if (
+    chat.qualities.length > 0 &&
+    (deal.quality === null || !chat.qualities.includes(deal.quality))
+  ) {
+    return false;
   }
 
-  const profitValue = BigInt(Math.round(profit));
-
-  if (profitValue < chat.minProfit) {
-    return null;
+  if (chat.points.length > 0 && !chat.points.includes(deal.point)) {
+    return false;
   }
 
-  if (chat.minMargin !== null && (margin === null || margin < chat.minMargin)) {
-    return null;
-  }
-
-  // Пустой список = все категории / все ранги.
   if (
     chat.categories.length > 0 &&
     !chat.categories.includes(topCategory(deal.category))
   ) {
+    return false;
+  }
+
+  if (
+    chat.ranks.length > 0 &&
+    !chat.ranks.includes(normalizedRank(deal.rank))
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+// Проходит ли оценка пороги чата. Возвращает прибыль (BigInt) или null.
+export function matchThreshold(
+  chat: AlertChat,
+  estimate: FlipEstimate,
+): bigint | null {
+  if (estimate.profit === null) {
     return null;
   }
 
-  if (chat.ranks.length > 0 && !chat.ranks.includes(normalizedRank(deal.rank))) {
+  const profit = BigInt(Math.round(estimate.profit));
+
+  if (profit < chat.minProfit) {
     return null;
   }
 
-  return { chat, profit: profitValue, margin };
+  if (
+    chat.minMargin !== null &&
+    (estimate.margin === null || estimate.margin < chat.minMargin)
+  ) {
+    return null;
+  }
+
+  return profit;
 }
 
 // Все чаты, которым подходит сделка.
-export function detectAlerts(deal: DealInput, chats: AlertChat[]): DealAlert[] {
+export function detectAlerts(
+  deal: DealInput,
+  chats: AlertChat[],
+  estimate: FlipEstimate,
+): DealAlert[] {
   const matches: DealAlert[] = [];
 
   for (const chat of chats) {
-    const match = matchAlert(deal, chat);
-
-    if (match) {
-      matches.push(match);
+    if (!matchFilters(deal, chat)) {
+      continue;
     }
+
+    const profit = matchThreshold(chat, estimate);
+
+    if (profit === null) {
+      continue;
+    }
+
+    matches.push({ chat, profit, margin: estimate.margin });
   }
 
   return matches;

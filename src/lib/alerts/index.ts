@@ -1,17 +1,17 @@
-import { getSzApi, type PricePoint } from "@/lib/auction";
-import { PERIODS } from "@/lib/auction/period";
+import { Prisma } from "@prisma/client";
+import type { PricePoint } from "@/lib/auction";
 import { listActiveAlertChats, markAlertSent } from "@/lib/db/alerts";
-import { saleKeyOf, saleStats } from "@/lib/db/sales";
+import { lastSalePrice, saleKeyOf, saleStats } from "@/lib/db/sales";
 import { itemsDatabase } from "@/lib/items/store";
 import { detectAlerts } from "./detect";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-// Период для средней/медианы — как период по умолчанию на сайте.
-const STATS_DAYS = PERIODS[0];
+import { ALERT_PERIODS, estimateFlip, type PeriodStats } from "./profit";
 
 // Ставит в очередь уведомления о новых сделках предмета (для процесса bot).
-// Воркер вызывает это после сохранения новых сделок; в Telegram ничего не шлём —
-// только пишем события в AlertEvent. Возвращает число поставленных в очередь.
+// Прибыль считаем от средней по совершённым сделкам с комиссией площадки.
+// В Telegram ничего не шлём — только пишем события в AlertEvent.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export async function checkAlerts(
   itemId: string,
   sales: PricePoint[],
@@ -20,7 +20,6 @@ export async function checkAlerts(
     return 0;
   }
 
-  // Нет активных чатов — не дёргаем API за лотами.
   const chats = await listActiveAlertChats();
 
   if (chats.length === 0) {
@@ -33,38 +32,42 @@ export async function checkAlerts(
     return 0;
   }
 
-  const api = getSzApi();
-
-  if (!api) {
-    return 0;
-  }
-
-  // Прибыль считаем относительно текущих активных лотов (один запрос на предмет).
-  const lots = await api.getLots(itemId);
-  // Сводка по рынку — одна на предмет (контекст к каждой сделке).
-  const stats = await saleStats(
-    itemId,
-    new Date(Date.now() - STATS_DAYS * DAY_MS),
-  );
   let queued = 0;
 
   for (const sale of sales) {
+    // Срез рынка — по собственному качеству и точке сделки (нет точки = 0).
+    const quality = sale.additional?.qlt ?? null;
+    const point = sale.additional?.ptn ?? 0;
+    const saleKey = saleKeyOf(itemId, sale);
+
+    // Рынок за периоды — без учёта самой сделки.
+    const periods = await slicePeriods(itemId, quality, point, saleKey);
+    const average =
+      periods.find((period) => period.days === ALERT_PERIODS[0])?.average ??
+      null;
+    const estimate = estimateFlip(sale.price, average);
+
     const matches = detectAlerts(
-      { price: sale.price, category: item.category, rank: item.color, lots },
+      { quality, point, category: item.category, rank: item.color },
       chats,
+      estimate,
     );
 
+    if (matches.length === 0) {
+      continue;
+    }
+
+    const lastPrice = await lastSalePrice(itemId, quality, point);
+
     for (const match of matches) {
-      // markAlertSent сам отсекает дубли по (alertChatId, saleKey).
       const created = await markAlertSent({
         alertChatId: match.chat.id,
         itemId,
-        saleKey: saleKeyOf(itemId, sale),
+        saleKey,
         profit: match.profit,
         margin: match.margin,
-        average: stats.average === null ? null : BigInt(stats.average),
-        median: stats.median === null ? null : BigInt(stats.median),
-        deals: stats.deals,
+        lastPrice: lastPrice === null ? null : BigInt(lastPrice),
+        stats: periods as unknown as Prisma.InputJsonValue,
       });
 
       if (created) {
@@ -74,4 +77,29 @@ export async function checkAlerts(
   }
 
   return queued;
+}
+
+// Рынок за 7/14/30 дней по срезу сделки (качество + точка).
+async function slicePeriods(
+  itemId: string,
+  quality: number | null,
+  point: number,
+  excludeKey: string,
+): Promise<PeriodStats[]> {
+  const now = Date.now();
+  const periods: PeriodStats[] = [];
+
+  for (const days of ALERT_PERIODS) {
+    const stats = await saleStats(
+      itemId,
+      new Date(now - days * DAY_MS),
+      quality,
+      point,
+      excludeKey,
+    );
+
+    periods.push({ days, ...stats });
+  }
+
+  return periods;
 }

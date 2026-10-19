@@ -31,7 +31,8 @@ export function MarketHistory({
   const query: MarketQuery = { days, quality, point };
 
   const average = summary.average;
-  // Прибыль/маржа считаются той же формулой, что и у детектора алертов.
+  // На странице прибыль = (1 − 5%) × средняя − мин. предложение.
+  // В алертах бота база другая — цена конкретной сделки, а не лот.
   const { minOffer, profit, margin } = estimateProfit(average, lots);
 
   return (
@@ -94,7 +95,11 @@ export function MarketHistory({
             <Stat label="Медиана" value={money(summary.median)} />
             <Stat label="Последняя сделка" value={money(summary.last)} />
             <Stat label="Мин. предложение" value={money(minOffer)} />
-            <Stat label="Прибыль (маржа)" value={profitText(profit, margin)} />
+            <Stat
+              label="Прибыль (маржа)"
+              value={profitText(profit, margin)}
+              hint="после комиссии 5%"
+            />
           </div>
 
           {summary.from && summary.to ? (

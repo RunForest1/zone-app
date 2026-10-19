@@ -17,10 +17,13 @@ import { isAllowedUser } from "./auth";
 
 const USAGE = [
   "Как менять фильтры:",
+  "/menu — настройки кнопками",
   "/filter minprofit 60000 — порог прибыли в валюте",
   "/filter margin 15 — порог маржи в % (margin off — выключить)",
   "/filter categories Оружие,Броня — разделы (categories все — сброс)",
   "/filter ranks Легенда,Мастер — ранги (ranks все — сброс)",
+  "/filter qlt 2-5 — качество 0–5, можно диапазон (qlt все — сброс)",
+  "/filter ptn 0-15 — точка 0–15, можно диапазон (ptn все — сброс)",
   "/status — текущие настройки",
   "/pause и /resume — пауза и возобновление",
 ].join("\n");
@@ -52,6 +55,8 @@ export function settingsText(chat: AlertChat): string {
       : "все";
   const ranks =
     chat.ranks.length > 0 ? chat.ranks.map(rankLabel).join(", ") : "все";
+  const quality = formatRange(chat.qualities, 5);
+  const point = formatRange(chat.points, 15);
   const state = chat.active ? "включены" : "на паузе";
 
   return [
@@ -60,7 +65,84 @@ export function settingsText(chat: AlertChat): string {
     `Порог маржи: <b>${margin}</b>`,
     `Категории: ${categories}`,
     `Ранги: ${ranks}`,
+    `Качество: ${quality}`,
+    `Точка: ${point}`,
   ].join("\n");
+}
+
+// Разбирает «2-5», «2,3,4,5» или «3» в набор чисел (с проверкой границы).
+function parseRange(value: string, max: number): number[] | null {
+  const result = new Set<number>();
+
+  for (const part of value.split(",")) {
+    const piece = part.trim();
+
+    if (piece === "") {
+      continue;
+    }
+
+    const range = /^(\d+)-(\d+)$/.exec(piece);
+
+    if (range) {
+      const from = Number(range[1]);
+      const to = Number(range[2]);
+
+      if (from > to || to > max) {
+        return null;
+      }
+
+      for (let number = from; number <= to; number += 1) {
+        result.add(number);
+      }
+
+      continue;
+    }
+
+    if (!/^\d+$/.test(piece) || Number(piece) > max) {
+      return null;
+    }
+
+    result.add(Number(piece));
+  }
+
+  if (result.size === 0) {
+    return null;
+  }
+
+  return [...result].sort((a, b) => a - b);
+}
+
+// Сжимает набор в компактную запись: [0,1,2,5] → «0–2, 5».
+function compactRange(values: number[]): string {
+  const sorted = [...values].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let start = sorted[0];
+  let previous = sorted[0];
+
+  for (let index = 1; index <= sorted.length; index += 1) {
+    const current = sorted[index];
+
+    if (current !== undefined && current === previous + 1) {
+      previous = current;
+      continue;
+    }
+
+    parts.push(start === previous ? String(start) : `${start}–${previous}`);
+
+    if (current === undefined) {
+      break;
+    }
+
+    start = current;
+    previous = current;
+  }
+
+  return parts.join(", ");
+}
+
+// Отображение набора-фильтра: пустой = «все».
+function formatRange(values: number[], max: number): string {
+  return values.length === 0 ? `все (0–${max})` : compactRange(values);
 }
 
 // Список через запятую → массив непустых элементов.
@@ -172,6 +254,36 @@ export function filterPatch(
     return { patch: { ranks: values } };
   }
 
+  if (field === "qlt") {
+    if (isAll(value)) {
+      return { patch: { qualities: [] } };
+    }
+
+    const values = parseRange(value, 5);
+
+    if (!values) {
+      return {
+        error: "Качество — 0–5 или диапазон, например: /filter qlt 2-5",
+      };
+    }
+
+    return { patch: { qualities: values } };
+  }
+
+  if (field === "ptn") {
+    if (isAll(value)) {
+      return { patch: { points: [] } };
+    }
+
+    const values = parseRange(value, 15);
+
+    if (!values) {
+      return { error: "Точка — 0–15 или диапазон, например: /filter ptn 0-15" };
+    }
+
+    return { patch: { points: values } };
+  }
+
   return { error: USAGE };
 }
 
@@ -198,22 +310,6 @@ export function registerCommands(bot: Bot): void {
     if (chatId) {
       await ctx.reply(`chat.id: ${chatId}`);
     }
-  });
-
-  bot.command("status", async (ctx) => {
-    if (!(await ensureAllowed(ctx))) {
-      return;
-    }
-
-    const chatId = chatIdOf(ctx);
-
-    if (!chatId) {
-      return;
-    }
-
-    const chat = await upsertAlertChat(chatId);
-
-    await ctx.reply(settingsText(chat), { parse_mode: "HTML" });
   });
 
   bot.command("filter", async (ctx) => {

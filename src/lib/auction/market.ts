@@ -193,8 +193,12 @@ function minOfferOf(lots: AuctionLot[]): number | null {
   return Math.min(...offers);
 }
 
-// Оценка выгоды: прибыль = цена − мин. предложение, маржа = прибыль / цена × 100.
-// Цена — это либо сделка (детектор алертов), либо средняя цена (страница).
+// Комиссия площадки при продаже (5%). Влияет на прибыль и на странице,
+// и в алертах бота: продаём по цене, а на руки приходит (1 − fee) от неё.
+export const MARKET_FEE = 0.05;
+
+// Оценка выгоды на странице: покупаем самый дешёвый лот, продаём по средней.
+// Прибыль = (1 − комиссия) × цена − мин. предложение; маржа = прибыль / цена × 100.
 // Маржа возвращается без округления — округляет тот, кто показывает.
 export interface ProfitEstimate {
   minOffer: number | null;
@@ -212,7 +216,7 @@ export function estimateProfit(
     return { minOffer, profit: null, margin: null };
   }
 
-  const profit = price - minOffer;
+  const profit = (1 - MARKET_FEE) * price - minOffer;
   const margin = price > 0 ? (profit / price) * 100 : null;
 
   return { minOffer, profit, margin };

@@ -1,4 +1,5 @@
 import { Bot } from "grammy";
+import type { PeriodStats } from "@/lib/alerts/profit";
 import { prisma } from "@/lib/db";
 import {
   listPendingAlertEvents,
@@ -10,6 +11,7 @@ import { itemName } from "@/lib/items/catalog";
 import { itemsDatabase } from "@/lib/items/store";
 import { registerCommands } from "./commands";
 import { formatAlertMessage } from "./format";
+import { registerMenu } from "./menu";
 import { buildProxyFetch } from "./proxy";
 
 // Процесс bot: принимает команды (long polling) и рассылает уведомления,
@@ -43,6 +45,41 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Разбирает сохранённый JSON со статистикой рынка в массив периодов.
+function readPeriods(value: unknown): PeriodStats[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const periods: PeriodStats[] = [];
+
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+    const days = Number(record.days);
+
+    if (!Number.isFinite(days)) {
+      continue;
+    }
+
+    periods.push({
+      days,
+      average: numberOrNull(record.average),
+      median: numberOrNull(record.median),
+      deals: Number(record.deals) || 0,
+    });
+  }
+
+  return periods;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 // Прокси — через собственный fetch: встроенный fetch Bun не умеет socks
 // и не чтит node-агенты, зато понимает нативный `proxy` (HTTP-прокси).
 const proxyFetch = buildProxyFetch();
@@ -58,6 +95,7 @@ const bot = new Bot(token, {
 });
 
 registerCommands(bot);
+registerMenu(bot);
 
 bot.catch((err) => {
   log(`ошибка обработчика — ${errorText(err.error)}`);
@@ -81,13 +119,12 @@ async function sendAlert(event: PendingAlertEvent): Promise<void> {
       name: itemName(item),
       rank: item.color,
       price: sale.price,
+      lastPrice: event.lastPrice === null ? null : Number(event.lastPrice),
       profit: Number(event.profit),
       margin: event.margin,
       quality: sale.quality,
       point: sale.point,
-      average: event.average === null ? null : Number(event.average),
-      median: event.median === null ? null : Number(event.median),
-      deals: event.deals,
+      periods: readPeriods(event.stats),
       time: sale.time,
     },
     DOMAIN,
@@ -124,6 +161,22 @@ async function main() {
   log(
     `запуск: @${me.username} (id ${me.id}), опрос очереди каждые ${POLL_MS} мс`,
   );
+
+  // Палитра команд (подсказка по «/»). Не критично — падение не должно
+  // мешать боту работать.
+  await bot.api
+    .setMyCommands([
+      { command: "start", description: "включить уведомления в этом чате" },
+      { command: "menu", description: "настройки кнопками" },
+      { command: "status", description: "показать текущие настройки" },
+      { command: "filter", description: "изменить фильтр текстом" },
+      { command: "pause", description: "поставить на паузу" },
+      { command: "resume", description: "возобновить" },
+      { command: "chatid", description: "показать id чата" },
+    ])
+    .catch((error) =>
+      log(`не удалось задать палитру команд — ${errorText(error)}`),
+    );
 
   if (!process.env.ALERT_ADMIN_USER_IDS) {
     log(

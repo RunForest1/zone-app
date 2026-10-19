@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import type { PricePoint } from "@/lib/auction";
 import { prisma } from "./index";
 
@@ -160,20 +161,38 @@ export interface SaleStats {
 }
 
 // Считаем в SQL: AVG и percentile_cont (медиана) — без выгрузки всех сделок.
+// Срез задаётся качеством и точкой сделки (отсутствующая точка — 0,
+// отсутствующее качество — отдельный срез). excludeKey исключает саму сделку.
 export async function saleStats(
   itemId: string,
   since: Date,
+  quality: number | null,
+  point: number,
+  excludeKey?: string,
 ): Promise<SaleStats> {
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`"itemId" = ${itemId}`,
+    Prisma.sql`"time" >= ${since}`,
+    quality === null
+      ? Prisma.sql`"quality" IS NULL`
+      : Prisma.sql`"quality" = ${quality}`,
+    Prisma.sql`COALESCE("point", 0) = ${point}`,
+  ];
+
+  if (excludeKey) {
+    conditions.push(Prisma.sql`"key" <> ${excludeKey}`);
+  }
+
   const rows = await prisma.$queryRaw<
     Array<{ deals: number; average: number | null; median: number | null }>
-  >`
+  >(Prisma.sql`
     SELECT
       COUNT(*)::int AS deals,
       AVG(price)::float8 AS average,
       percentile_cont(0.5) WITHIN GROUP (ORDER BY price::float8) AS median
     FROM "Sale"
-    WHERE "itemId" = ${itemId} AND "time" >= ${since}
-  `;
+    WHERE ${Prisma.join(conditions, " AND ")}
+  `);
 
   const row = rows[0];
 
@@ -186,6 +205,25 @@ export async function saleStats(
     average: row.average === null ? null : Math.round(row.average),
     median: row.median === null ? null : Math.round(row.median),
   };
+}
+
+// Цена последней совершённой сделки по тому же качеству и точке.
+export async function lastSalePrice(
+  itemId: string,
+  quality: number | null,
+  point: number,
+): Promise<number | null> {
+  const row = await prisma.sale.findFirst({
+    where: {
+      itemId,
+      ...(quality === null ? { quality: null } : { quality }),
+      ...(point === 0 ? { OR: [{ point: 0 }, { point: null }] } : { point }),
+    },
+    orderBy: { time: "desc" },
+    select: { price: true },
+  });
+
+  return row ? Number(row.price) : null;
 }
 
 // Собран ли уже базовый период истории предмета.

@@ -12,6 +12,8 @@ export interface AlertChatPatch {
   minMargin?: number | null;
   categories?: string[];
   ranks?: string[];
+  qualities?: number[];
+  points?: number[];
   active?: boolean;
 }
 
@@ -57,9 +59,8 @@ export async function markAlertSent(input: {
   saleKey: string;
   profit: bigint;
   margin: number | null;
-  average: bigint | null;
-  median: bigint | null;
-  deals: number;
+  lastPrice: bigint | null;
+  stats: Prisma.InputJsonValue;
 }): Promise<boolean> {
   try {
     await prisma.alertEvent.create({ data: input });
