@@ -121,8 +121,9 @@ services:
       # Ссылки в уведомлениях на тот же домен, что и у сайта.
       DOMAIN: ${DOMAIN}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      # Имя КОНТЕЙНЕРА shared-proxy, не сервиса.
-      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-socks5://shared-proxy:1080}
+      # Имя КОНТЕЙНЕРА shared-proxy, не сервиса. Порт 1081 — http-inbound
+      # Xray (fetch Bun не умеет socks, поэтому только http-прокси).
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-http://shared-proxy:1081}
       ALERT_ADMIN_USER_IDS: ${ALERT_ADMIN_USER_IDS}
       BOT_POLL_MS: ${BOT_POLL_MS:-10000}
     depends_on:

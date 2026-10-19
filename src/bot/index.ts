@@ -10,7 +10,7 @@ import { itemName } from "@/lib/items/catalog";
 import { itemsDatabase } from "@/lib/items/store";
 import { registerCommands } from "./commands";
 import { formatAlertMessage } from "./format";
-import { buildProxyAgent } from "./proxy";
+import { buildProxyFetch } from "./proxy";
 
 // Процесс bot: принимает команды (long polling) и рассылает уведомления,
 // которые воркер поставил в очередь (AlertEvent). В API аукциона не ходит.
@@ -43,10 +43,18 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Прокси-агент передаём в grammY: под Bun это Node-сборка на node-fetch,
-// поэтому baseFetchConfig.agent учитывается.
+// Прокси — через собственный fetch: встроенный fetch Bun не умеет socks
+// и не чтит node-агенты, зато понимает нативный `proxy` (HTTP-прокси).
+const proxyFetch = buildProxyFetch();
+
+if (proxyFetch && process.env.TELEGRAM_PROXY_URL?.startsWith("socks")) {
+  log(
+    "TELEGRAM_PROXY_URL начинается с socks:// — fetch Bun это не поддерживает; нужен http://shared-proxy:1081",
+  );
+}
+
 const bot = new Bot(token, {
-  client: { baseFetchConfig: { agent: buildProxyAgent() } },
+  client: proxyFetch ? { fetch: proxyFetch } : {},
 });
 
 registerCommands(bot);
