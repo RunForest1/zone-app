@@ -7,15 +7,19 @@
     "build": "next build",
     "start": "next start",
     "worker": "bun src/worker/index.ts",
+    "bot": "bun src/bot/index.ts",
     "db:generate": "prisma generate",
     "migrate": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
+    "grammy": "^1.46.0",
+    "https-proxy-agent": "^9.1.0",
     "next": "16.4.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "socks-proxy-agent": "^10.1.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",

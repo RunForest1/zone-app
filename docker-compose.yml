@@ -107,3 +107,42 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # ---------- телеграм-бот уведомлений ----------
+  # Тот же образ, что и у воркера (target worker), но с командой бота.
+  # В Telegram ходит через общий прокси-стек shared-proxy (внешняя сеть).
+  bot:
+    build:
+      context: .
+      target: worker
+    command: ["bun", "src/bot/index.ts"]
+    environment:
+      DATABASE_URL: *database-url
+      # Ссылки в уведомлениях на тот же домен, что и у сайта.
+      DOMAIN: ${DOMAIN}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      # Имя КОНТЕЙНЕРА shared-proxy, не сервиса.
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-socks5://shared-proxy:1080}
+      ALERT_ADMIN_USER_IDS: ${ALERT_ADMIN_USER_IDS}
+      BOT_POLL_MS: ${BOT_POLL_MS:-10000}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # default — чтобы достать до db этого проекта, shared-proxy-net — до прокси.
+    networks:
+      - default
+      - shared-proxy-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  # Сеть создана отдельным стеком ~/infra/shared-proxy (Xray-core),
+  # а не этим compose-файлом.
+  shared-proxy-net:
+    external: true

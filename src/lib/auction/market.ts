@@ -179,3 +179,41 @@ function medianOf(prices: number[]): number | null {
 
   return Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
+
+// Минимальный выкуп среди активных лотов (0 и отрицательные не считаем).
+function minOfferOf(lots: AuctionLot[]): number | null {
+  const offers = lots
+    .map((lot) => lot.buyoutPrice)
+    .filter((value) => value > 0);
+
+  if (offers.length === 0) {
+    return null;
+  }
+
+  return Math.min(...offers);
+}
+
+// Оценка выгоды: прибыль = цена − мин. предложение, маржа = прибыль / цена × 100.
+// Цена — это либо сделка (детектор алертов), либо средняя цена (страница).
+// Маржа возвращается без округления — округляет тот, кто показывает.
+export interface ProfitEstimate {
+  minOffer: number | null;
+  profit: number | null;
+  margin: number | null;
+}
+
+export function estimateProfit(
+  price: number | null,
+  lots: AuctionLot[],
+): ProfitEstimate {
+  const minOffer = minOfferOf(lots);
+
+  if (price === null || minOffer === null) {
+    return { minOffer, profit: null, margin: null };
+  }
+
+  const profit = price - minOffer;
+  const margin = price > 0 ? (profit / price) * 100 : null;
+
+  return { minOffer, profit, margin };
+}

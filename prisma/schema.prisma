@@ -1,4 +1,5 @@
-// Схема БД: сделки, отслеживаемые предметы, состояние и лог синхронизации.
+// Схема БД: сделки, отслеживаемые предметы, состояние и лог синхронизации,
+// а также подписки телеграм-бота и лог его уведомлений.
 
 generator client {
   provider = "prisma-client-js"
@@ -75,4 +76,60 @@ model SyncLog {
   message String?
 
   @@index([startedAt])
+}
+
+// Чат (обычно один групповой), куда бот шлёт уведомления, со своими фильтрами.
+model AlertChat {
+  id             String @id @default(cuid())
+  // chat.id из Telegram (отрицательный для групп) храним строкой.
+  telegramChatId String @unique
+  // Название чата — для логов и отладки.
+  title String?
+
+  // Порог прибыли в игровой валюте (деньги храним BigInt, как в Sale.price).
+  minProfit BigInt @default(50000)
+  // Порог маржи в % (необязательный).
+  minMargin Float?
+  // Пусто = все категории (верхний уровень CATEGORY_TREE) / все ранги.
+  categories String[] @default([])
+  ranks      String[] @default([])
+
+  // /pause выключает без удаления настроек.
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events AlertEvent[]
+}
+
+// Уведомление о выгодной сделке: строка-очередь и лог отправки одновременно.
+// sentAt = null — событие ещё не отправлено (его берёт процесс bot).
+model AlertEvent {
+  id          String    @id @default(cuid())
+  alertChatId String
+  alertChat   AlertChat @relation(fields: [alertChatId], references: [id], onDelete: Cascade)
+
+  // id предмета (как в ItemsDatabase) и ключ сделки из Sale.key.
+  itemId  String
+  saleKey String
+
+  // Прибыль и маржа, посчитанные детектором воркера.
+  profit BigInt
+  margin Float?
+
+  // Контекст рынка на момент сделки: средняя цена, медиана и число сделок
+  // за период (как период по умолчанию на сайте).
+  average BigInt?
+  median  BigInt?
+  deals   Int     @default(0)
+
+  // Когда уведомление отправлено (null — в очереди).
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  // Одна и та же сделка не шлётся чату дважды.
+  @@unique([alertChatId, saleKey])
+  @@index([itemId])
+  @@index([sentAt])
 }

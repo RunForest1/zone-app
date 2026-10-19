@@ -227,6 +227,41 @@ export function rankColor(color: string): string {
   return RANK_COLORS[color] ?? RANK_COLORS.DEFAULT;
 }
 
+// Верхний уровень категорий (для подсказок и команд бота).
+export const TOP_CATEGORY_OPTIONS: FilterOption[] = CATEGORY_TREE.map(
+  (node) => ({
+    value: node.value,
+    label: node.label,
+  }),
+);
+
+// Значение верхнего уровня категории по подписи или самому значению
+// (для команды /filter categories). Неизвестное — null.
+export function topCategoryValue(input: string): string | null {
+  const needle = input.trim().toLowerCase();
+  const node = CATEGORY_TREE.find(
+    (item) =>
+      item.value.toLowerCase() === needle ||
+      item.label.toLowerCase() === needle,
+  );
+
+  return node ? node.value : null;
+}
+
+// Значение ранга по подписи или самому значению (для /filter ranks).
+// Неизвестное — null. Пустое значение («Все ранги») не возвращаем.
+export function rankValue(input: string): string | null {
+  const needle = input.trim().toLowerCase();
+  const option = RANK_OPTIONS.find(
+    (item) =>
+      item.value !== "" &&
+      (item.value.toLowerCase() === needle ||
+        item.label.toLowerCase() === needle),
+  );
+
+  return option ? option.value : null;
+}
+
 // Локализованное имя предмета (русский, с запасными вариантами).
 export function itemName(item: Item): string {
   return item.name.lines?.ru ?? item.name.lines?.en ?? item.id;

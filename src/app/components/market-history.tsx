@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { AuctionLot } from "@/lib/auction";
-import type { HistorySummary } from "@/lib/auction/market";
+import { estimateProfit, type HistorySummary } from "@/lib/auction/market";
 import { PERIODS, marketHref, type MarketQuery } from "@/lib/auction/period";
 import { qualityLabel } from "@/lib/auction/quality";
 import { formatDay, formatPrice } from "@/lib/format";
@@ -30,12 +30,9 @@ export function MarketHistory({
 }) {
   const query: MarketQuery = { days, quality, point };
 
-  const minOffer = minOfferOf(lots);
   const average = summary.average;
-  const profit =
-    average !== null && minOffer !== null ? average - minOffer : null;
-  const margin =
-    profit !== null && average ? Math.round((profit / average) * 100) : null;
+  // Прибыль/маржа считаются той же формулой, что и у детектора алертов.
+  const { minOffer, profit, margin } = estimateProfit(average, lots);
 
   return (
     <div className="flex flex-col gap-6">
@@ -125,7 +122,9 @@ function Chips({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs uppercase tracking-wide text-faint">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-faint">
+        {label}
+      </span>
       {options.map((option) => (
         <Link
           key={option.value}
@@ -146,17 +145,6 @@ function chipClass(active: boolean): string {
   }
 
   return "rounded-lg border border-line bg-background px-3 py-1.5 text-sm text-muted transition-colors hover:text-foreground";
-}
-
-// Минимальный выкуп среди активных лотов.
-function minOfferOf(lots: AuctionLot[]): number | null {
-  const offers = lots.map((lot) => lot.buyoutPrice).filter((value) => value > 0);
-
-  if (offers.length === 0) {
-    return null;
-  }
-
-  return Math.min(...offers);
 }
 
 function money(value: number | null): string {
@@ -209,7 +197,7 @@ function profitText(profit: number | null, margin: number | null): string {
     return "—";
   }
 
-  return `${formatPrice(profit)} (${margin ?? 0}%)`;
+  return `${formatPrice(profit)} (${Math.round(margin ?? 0)}%)`;
 }
 
 // Показатель статистики.

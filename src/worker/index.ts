@@ -4,8 +4,9 @@ import {
   INCREMENT_PAGES,
   getSzApi,
 } from "@/lib/auction";
+import { checkAlerts } from "@/lib/alerts";
 import { prisma } from "@/lib/db";
-import { latestSaleTime, saveSales } from "@/lib/db/sales";
+import { freshSales, latestSaleTime, saveSales } from "@/lib/db/sales";
 
 // Период обхода отслеживаемых предметов и глубина разового backfill.
 // Дописывание новых сделок — каждый прогон; backfill — один раз на предмет.
@@ -57,6 +58,9 @@ async function syncItem(itemId: string): Promise<number> {
       since,
       maxPages,
     );
+    // Новые сделки для алертов определяем до сохранения (пока их нет в БД).
+    // На backfill уведомления не шлём — иначе зальём чат историей за 30 дней.
+    const fresh = isBackfill ? [] : await freshSales(itemId, points);
     const added = await saveSales(itemId, points);
     const newest =
       points.length > 0 ? new Date(points[points.length - 1].time) : lastSale;
@@ -96,6 +100,20 @@ async function syncItem(itemId: string): Promise<number> {
         message: isBackfill ? "backfill" : null,
       },
     });
+
+    // Ставим в очередь уведомления о новых выгодных сделках.
+    // Сбой алертов не должен ломать синхронизацию сделок.
+    if (fresh.length > 0) {
+      try {
+        const queued = await checkAlerts(itemId, fresh);
+
+        if (queued > 0) {
+          log(`${itemId}: уведомлений в очередь: ${queued}`);
+        }
+      } catch (error) {
+        log(`${itemId}: алерты не удались — ${errorText(error)}`);
+      }
+    }
 
     log(`${itemId}: +${added} сделок${isBackfill ? " (backfill)" : ""}`);
 

@@ -1,6 +1,8 @@
 # Мульти-стейдж сборка. Два целевых образа (target):
 #   web    — Next.js в standalone-режиме (node:22-slim);
-#   worker — фоновый процесс синхронизации истории (bun).
+#   worker — фоновые процессы на bun: синхронизация истории, телеграм-бот
+#            и разовый прогон миграций. Один и тот же образ запускается
+#            с разной командой (см. docker-compose.yml).
 # Общий слой deps/build используется обоими.
 
 # ---------- зависимости ----------
@@ -45,14 +47,14 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:3000/api/health || exit 1
 CMD ["node", "server.js"]
 
-# ---------- worker (фоновый процесс) ----------
+# ---------- worker (фоновые процессы: синхронизация, бот, миграции) ----------
 FROM oven/bun:1 AS worker
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
-# Для воркера нужны: исходники, схема и клиент Prisma (миграции тоже отсюда).
+# Нужны: исходники (воркер, bot, lib), схема и клиент Prisma (миграции отсюда же).
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json bun.lock tsconfig.json ./
 COPY prisma ./prisma
