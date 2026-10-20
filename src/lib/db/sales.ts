@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PricePoint } from "@/lib/auction";
+import { OUTLIER_MEDIAN_FACTOR, OUTLIER_TRIM } from "@/lib/auction/market";
 import { prisma } from "./index";
 
 // Ключ дедупликации сделки: по нему одинаковые записи из API не задваиваются.
@@ -186,12 +187,24 @@ export async function saleStats(
   const rows = await prisma.$queryRaw<
     Array<{ deals: number; average: number | null; median: number | null }>
   >(Prisma.sql`
+    WITH slice AS (
+      SELECT price::float8 AS price
+      FROM "Sale"
+      WHERE ${Prisma.join(conditions, " AND ")}
+    ),
+    bounds AS (
+      SELECT
+        percentile_cont(${1 - OUTLIER_TRIM}) WITHIN GROUP (ORDER BY price) AS top,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY price) AS med
+      FROM slice
+    )
     SELECT
-      COUNT(*)::int AS deals,
-      AVG(price)::float8 AS average,
-      percentile_cont(0.5) WITHIN GROUP (ORDER BY price::float8) AS median
-    FROM "Sale"
-    WHERE ${Prisma.join(conditions, " AND ")}
+      (SELECT COUNT(*)::int FROM slice) AS deals,
+      (
+        SELECT AVG(price) FROM slice, bounds
+        WHERE price <= bounds.top AND price <= bounds.med * ${OUTLIER_MEDIAN_FACTOR}
+      ) AS average,
+      (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY price) FROM slice) AS median
   `);
 
   const row = rows[0];
@@ -226,27 +239,9 @@ export async function lastSalePrice(
   return row ? Number(row.price) : null;
 }
 
-// Собран ли уже базовый период истории предмета.
-export async function isBackfilled(itemId: string): Promise<boolean> {
-  const state = await prisma.itemSync.findUnique({
-    where: { itemId },
-    select: { backfilledAt: true },
-  });
-
-  return Boolean(state?.backfilledAt);
-}
-
-// Отмечает, что история за базовый период собрана.
-export async function markBackfilled(itemId: string): Promise<void> {
-  await prisma.itemSync.upsert({
-    where: { itemId },
-    create: { itemId, backfilledAt: new Date(), lastSyncedAt: new Date() },
-    update: { backfilledAt: new Date(), lastSyncedAt: new Date() },
-  });
-}
-
-// Помечает предмет отслеживаемым (чтобы воркер знал, за чем следить).
-export async function trackItem(itemId: string): Promise<void> {
+// Создаёт строки предмета (TrackedItem + ItemSync), если их ещё нет. Нужны как
+// владельцы сделок (внешний ключ) для любого предмета, по которому храним историю.
+export async function ensureItem(itemId: string): Promise<void> {
   await prisma.trackedItem.upsert({
     where: { id: itemId },
     create: { id: itemId },
@@ -258,4 +253,38 @@ export async function trackItem(itemId: string): Promise<void> {
     create: { itemId },
     update: {},
   });
+}
+
+// Избранное: помечено вручную; воркер синкает только избранные предметы.
+export async function setFavorite(
+  itemId: string,
+  favorite: boolean,
+): Promise<void> {
+  await ensureItem(itemId);
+
+  await prisma.trackedItem.update({
+    where: { id: itemId },
+    data: { favorite },
+  });
+}
+
+// id избранных предметов (для каталога и воркера).
+export async function listFavoriteIds(): Promise<string[]> {
+  const rows = await prisma.trackedItem.findMany({
+    where: { favorite: true },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return rows.map((row) => row.id);
+}
+
+// В избранном ли предмет.
+export async function isFavorite(itemId: string): Promise<boolean> {
+  const row = await prisma.trackedItem.findUnique({
+    where: { id: itemId },
+    select: { favorite: true },
+  });
+
+  return row?.favorite ?? false;
 }

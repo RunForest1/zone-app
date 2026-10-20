@@ -20,12 +20,28 @@ import { ItemCard } from "./item-card";
 const PAGE_SIZE = 120;
 
 // Каталог: меню категорий слева, панель поиска/фильтров сверху, сетка карточек.
-export function ItemCatalog({ items }: { items: ItemSummary[] }) {
+// Избранные предметы (звёздочка) всегда идут первыми.
+export function ItemCatalog({
+  items,
+  favoriteIds,
+}: {
+  items: ItemSummary[];
+  favoriteIds: string[];
+}) {
   const [filters, setFilters] = useState<CatalogFilters>(EMPTY_FILTERS);
   const [limit, setLimit] = useState(PAGE_SIZE);
 
   const categories = useMemo(() => topCategories(items), [items]);
-  const visible = useMemo(() => applyFilters(items, filters), [items, filters]);
+  // Избранное приходит с сервера; после переключения звёздочки оно обновляется
+  // (router.refresh в FavoriteButton), и порядок пересчитывается.
+  const favorites = useMemo(() => new Set(favoriteIds), [favoriteIds]);
+  const visible = useMemo(() => {
+    const list = applyFilters(items, filters);
+    // Избранные — первыми; порядок внутри групп сохраняем (сортировка стабильная).
+    return [...list].sort(
+      (a, b) => Number(favorites.has(b.id)) - Number(favorites.has(a.id)),
+    );
+  }, [items, filters, favorites]);
   const shown = visible.slice(0, limit);
 
   // «По разделам» не нужна внутри одной категории, «по рангу» — при одном ранге.
@@ -107,7 +123,11 @@ export function ItemCatalog({ items }: { items: ItemSummary[] }) {
         ) : (
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
             {shown.map((item) => (
-              <ItemCard key={item.id} item={item} />
+              <ItemCard
+                key={item.id}
+                item={item}
+                favorite={favorites.has(item.id)}
+              />
             ))}
           </div>
         )}

@@ -2,6 +2,7 @@ import type { AlertChat } from "@prisma/client";
 import { InlineKeyboard, type Bot, type Context } from "grammy";
 import { qualityLabel } from "@/lib/auction/quality";
 import { upsertAlertChat, type AlertChatPatch } from "@/lib/db/alerts";
+import { isFavorite, setFavorite } from "@/lib/db/sales";
 import { RANK_OPTIONS, TOP_CATEGORY_OPTIONS } from "@/lib/items/catalog";
 import { isAllowedUser } from "./auth";
 import { settingsText } from "./commands";
@@ -88,6 +89,17 @@ export function menuPatch(
   }
 
   return null;
+}
+
+// Клавиатура под уведомлением: добавление/снятие предмета из избранного.
+export function favoriteKeyboard(
+  itemId: string,
+  favorite: boolean,
+): InlineKeyboard {
+  return new InlineKeyboard().text(
+    favorite ? "⭐ В избранном" : "⭐ В избранное",
+    `fav:${itemId}`,
+  );
 }
 
 // Текст панели настроек.
@@ -213,6 +225,11 @@ export function registerMenu(bot: Bot): void {
   bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
 
+    if (data.startsWith("fav:")) {
+      await handleFavorite(ctx, data.slice(4));
+      return;
+    }
+
     if (data === "noop") {
       await ctx.answerCallbackQuery();
       return;
@@ -243,6 +260,26 @@ export function registerMenu(bot: Bot): void {
       })
       .catch(() => undefined);
   });
+}
+
+// Переключает избранное по кнопке под уведомлением.
+async function handleFavorite(ctx: Context, itemId: string): Promise<void> {
+  if (!itemId || !(await allowed(ctx))) {
+    return;
+  }
+
+  const favorite = !(await isFavorite(itemId));
+  await setFavorite(itemId, favorite);
+
+  await ctx.answerCallbackQuery({
+    text: favorite ? "Добавлено в избранное" : "Убрано из избранного",
+  });
+
+  await ctx
+    .editMessageReplyMarkup({
+      reply_markup: favoriteKeyboard(itemId, favorite),
+    })
+    .catch(() => undefined);
 }
 
 // Проверяет права; при отказе отвечает во всплывающем уведомлении.

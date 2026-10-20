@@ -90,6 +90,8 @@ export interface HistorySummary {
   min: number | null;
   max: number | null;
   last: number | null;
+  // Сколько сделок отброшено как выбросы (верхний хвост) при подсчёте средней.
+  dropped: number;
   // Границы реально полученных данных (для честной подписи о покрытии).
   from: string | null;
   to: string | null;
@@ -109,6 +111,7 @@ export function summarize(points: PricePoint[]): HistorySummary {
     min: null,
     max: null,
     last: null,
+    dropped: 0,
     from: null,
     to: null,
   };
@@ -118,20 +121,51 @@ export function summarize(points: PricePoint[]): HistorySummary {
   }
 
   const prices = points.map((point) => point.price);
-  const sum = prices.reduce((total, price) => total + price, 0);
+  // Среднюю считаем без выбросов: единичные «вкиды» сильно её завышают.
+  const cleaned = cleanedPrices(prices);
+  const average =
+    cleaned.values.length > 0
+      ? Math.round(
+          cleaned.values.reduce((total, price) => total + price, 0) /
+            cleaned.values.length,
+        )
+      : null;
 
   return {
     series: buildSeries(points),
     count: points.length,
     sold: points.reduce((total, point) => total + (point.amount || 1), 0),
-    average: Math.round(sum / prices.length),
+    average,
     median: medianOf(prices),
     min: Math.min(...prices),
     max: Math.max(...prices),
     last: prices[prices.length - 1],
+    dropped: cleaned.dropped,
     from: points[0].time,
     to: points[points.length - 1].time,
   };
+}
+
+// Отбрасывает выбросы для устойчивой средней: верхний хвост (OUTLIER_TRIM)
+// и цены выше медианы в OUTLIER_MEDIAN_FACTOR раз (второе работает и на малых
+// выборках, где процентная обрезка округляется в ноль).
+function cleanedPrices(prices: number[]): {
+  values: number[];
+  dropped: number;
+} {
+  const sorted = [...prices].sort((a, b) => a - b);
+  const cut = Math.floor(sorted.length * OUTLIER_TRIM);
+  const trimmed = cut > 0 ? sorted.slice(0, sorted.length - cut) : sorted;
+  const median = medianOf(sorted);
+
+  if (median === null) {
+    return { values: trimmed, dropped: 0 };
+  }
+
+  const cap = median * OUTLIER_MEDIAN_FACTOR;
+  const values = trimmed.filter((price) => price <= cap);
+
+  return { values, dropped: sorted.length - values.length };
 }
 
 // Ряд для графика: окно делится на равные интервалы, внутри — средняя цена.
@@ -196,6 +230,14 @@ function minOfferOf(lots: AuctionLot[]): number | null {
 // Комиссия площадки при продаже (5%). Влияет на прибыль и на странице,
 // и в алертах бота: продаём по цене, а на руки приходит (1 − fee) от неё.
 export const MARKET_FEE = 0.05;
+
+// Доля верхнего хвоста сделок, которую отбрасываем при подсчёте средней
+// (выбросы — «вкиды»/переброс валюты). Медиана от выбросов и так устойчива.
+export const OUTLIER_TRIM = 0.05;
+
+// Вторая страховка от выбросов: цена выше медианы в это число раз считается
+// выбросом. Нужна на малых выборках, где процентная обрезка даёт 0.
+export const OUTLIER_MEDIAN_FACTOR = 5;
 
 // Оценка выгоды на странице: покупаем самый дешёвый лот, продаём по средней.
 // Прибыль = (1 − комиссия) × цена − мин. предложение; маржа = прибыль / цена × 100.

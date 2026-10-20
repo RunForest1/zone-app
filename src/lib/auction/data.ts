@@ -1,17 +1,6 @@
 import { cacheLife, cacheTag } from "next/cache";
-import {
-  BACKFILL_DAYS,
-  BACKFILL_PAGES,
-  type AuctionLot,
-  type PricePoint,
-} from "./index";
-import { getSzApi } from "./index";
-import {
-  isBackfilled,
-  markBackfilled,
-  readSales,
-  saveSales,
-} from "@/lib/db/sales";
+import { getSzApi, type AuctionLot, type PricePoint } from "./index";
+import { readSales } from "@/lib/db/sales";
 
 // Сколько времени в миллисекундах в сутках.
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -41,38 +30,9 @@ export async function loadLots(itemId: string): Promise<AuctionLot[]> {
   return api.getLots(itemId);
 }
 
-// Первый просмотр предмета: если история ещё не собиралась, забираем её
-// из API сразу (за BACKFILL_DAYS дней) и сохраняем в БД, чтобы данные
-// появились без ожидания воркера. Дальше историю дописывает воркер.
-// Вызывать только после `connection()`: внутри есть и Date.now(), и запись в БД.
-export async function ensureHistory(itemId: string): Promise<void> {
-  if (await isBackfilled(itemId)) {
-    return;
-  }
-
-  const api = getSzApi();
-
-  if (!api) {
-    return;
-  }
-
-  const since = Date.now() - BACKFILL_DAYS * DAY_MS;
-  const { points, complete } = await api.getHistorySince(
-    itemId,
-    since,
-    BACKFILL_PAGES,
-  );
-
-  await saveSales(itemId, points);
-
-  // Пометку ставим, только если добрали весь период; иначе повторим позже.
-  if (complete) {
-    await markBackfilled(itemId);
-  }
-}
-
 // История сделок за окно периода. Читается из PostgreSQL: API дёргает
-// фоновый воркер, поэтому страница в API не ходит.
+// синхронизация (воркер по избранному или подтягивание по открытию карточки),
+// поэтому страница в API не ходит.
 // Сигнатура прежняя — её передаёт ItemHistory.
 export async function loadHistory(
   itemId: string,

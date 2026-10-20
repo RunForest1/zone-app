@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { FavoriteButton } from "@/app/components/favorite-button";
 import { ItemHistory } from "@/app/components/item-history";
 import { ItemLots } from "@/app/components/item-lots";
 import { ItemIcon } from "@/app/components/item-icon";
 import { Placeholder } from "@/app/components/placeholder";
 import { parseFeature, parsePeriod } from "@/lib/auction/period";
+import { isFavorite } from "@/lib/db/sales";
 import {
   categoryLabel,
   iconUrl,
@@ -73,6 +75,15 @@ async function ItemContent({
     notFound();
   }
 
+  // Избранное читаем из БД; если её нет — считаем, что не в избранном.
+  let favorite = false;
+
+  try {
+    favorite = await isFavorite(item.id);
+  } catch (error) {
+    console.error("[favorite] не удалось прочитать избранное:", error);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <Link
@@ -102,6 +113,12 @@ async function ItemContent({
             </span>
           </p>
         </div>
+
+        <FavoriteButton
+          itemId={item.id}
+          favorite={favorite}
+          className="ml-auto shrink-0 rounded-lg px-2 text-2xl leading-none text-faint transition-colors hover:text-accent aria-pressed:text-accent"
+        />
       </header>
 
       {/* История и лоты — отдельные Suspense: лоты (один запрос) показываются

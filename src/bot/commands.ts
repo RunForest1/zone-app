@@ -1,15 +1,18 @@
 import type { AlertChat } from "@prisma/client";
 import type { Bot, Context } from "grammy";
 import { upsertAlertChat, type AlertChatPatch } from "@/lib/db/alerts";
+import { setFavorite } from "@/lib/db/sales";
 import { formatPrice } from "@/lib/format";
 import {
   categoryLabel,
+  itemName,
   RANK_OPTIONS,
   rankLabel,
   rankValue,
   TOP_CATEGORY_OPTIONS,
   topCategoryValue,
 } from "@/lib/items/catalog";
+import { itemsDatabase } from "@/lib/items/store";
 import { isAllowedUser } from "./auth";
 
 // Команды бота: /start и /chatid — без ограничений, остальные (меняют
@@ -25,6 +28,7 @@ const USAGE = [
   "/filter qlt 2-5 — качество 0–5, можно диапазон (qlt все — сброс)",
   "/filter ptn 0-15 — точка 0–15, можно диапазон (ptn все — сброс)",
   "/status — текущие настройки",
+  "/track <id> и /untrack <id> — избранное (id — из ссылки на предмет)",
   "/pause и /resume — пауза и возобновление",
 ].join("\n");
 
@@ -44,6 +48,33 @@ async function ensureAllowed(ctx: Context): Promise<boolean> {
   );
 
   return false;
+}
+
+// /track <id> и /untrack <id>: добавление/снятие избранного по id предмета
+// (id виден в ссылке на предмет на сайте).
+async function toggleTracked(ctx: Context, favorite: boolean): Promise<void> {
+  if (!(await ensureAllowed(ctx))) {
+    return;
+  }
+
+  const match = typeof ctx.match === "string" ? ctx.match : "";
+  const itemId = match.trim().split(/\s+/)[0] ?? "";
+  const item = itemId ? itemsDatabase.get(itemId) : undefined;
+
+  if (!item) {
+    await ctx.reply(
+      `Не знаю такой предмет. Формат: /${favorite ? "track" : "untrack"} <id> (id — из ссылки на предмет)`,
+    );
+    return;
+  }
+
+  await setFavorite(itemId, favorite);
+
+  await ctx.reply(
+    favorite
+      ? `⭐ «${itemName(item)}» в избранном`
+      : `«${itemName(item)}» убран из избранного`,
+  );
 }
 
 // Текущие настройки чата в виде текста (HTML-разметка).
@@ -336,6 +367,14 @@ export function registerCommands(bot: Bot): void {
     await ctx.reply(`Обновил настройки.\n\n${settingsText(chat)}`, {
       parse_mode: "HTML",
     });
+  });
+
+  bot.command("track", async (ctx) => {
+    await toggleTracked(ctx, true);
+  });
+
+  bot.command("untrack", async (ctx) => {
+    await toggleTracked(ctx, false);
   });
 
   bot.command("pause", async (ctx) => {

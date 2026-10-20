@@ -10,11 +10,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Предмет, за которым следит воркер (появляется при открытии карточки).
+// Предмет, по которому храним историю сделок (появляется при открытии карточки
+// или добавлении в избранное).
 model TrackedItem {
   id        String   @id
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Избранное: помечено вручную (веб/бот). Воркер синкает только избранные.
+  favorite Boolean @default(false)
 
   sales Sale[]
   sync  ItemSync?

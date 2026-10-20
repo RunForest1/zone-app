@@ -1,17 +1,12 @@
 import { connection } from "next/server";
-import { trackItem } from "@/app/actions";
 import {
   availableValues,
   featureRange,
   filterEntries,
   summarize,
 } from "@/lib/auction/market";
-import {
-  ensureHistory,
-  loadHistory,
-  loadLots,
-  windowOf,
-} from "@/lib/auction/data";
+import { loadHistory, loadLots, windowOf } from "@/lib/auction/data";
+import { syncOnDemand } from "@/lib/sync";
 import { Placeholder } from "./placeholder";
 import { MarketHistory } from "./market-history";
 
@@ -33,22 +28,15 @@ export async function ItemHistory({
   await connection();
   const now = Date.now();
 
-  // Открыли карточку — помечаем предмет отслеживаемым, чтобы воркер
-  // подтянул и дальше поддерживал его историю в БД.
+  // Подтягиваем историю по открытию карточки: разовый backfill или докачка
+  // нового. Предмет избранным от этого не становится — постоянно синкаются
+  // только избранные (это делает воркер).
   // Ошибку не глотаем молча: без БД/миграций история не появится,
   // и причина должна быть видна в логах контейнера web.
   try {
-    await trackItem(itemId);
+    await syncOnDemand(itemId);
   } catch (error) {
-    console.error("[track] не удалось пометить предмет:", itemId, error);
-  }
-
-  // Если история по предмету ещё не собиралась, забираем её из API прямо
-  // сейчас (за 30 дней) и кладём в БД — страница не ждёт воркера.
-  try {
-    await ensureHistory(itemId);
-  } catch (error) {
-    console.error("[history] не удалось загрузить историю:", itemId, error);
+    console.error("[sync] не удалось подтянуть историю:", itemId, error);
   }
 
   let lots;

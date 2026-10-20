@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import type { AuctionLot } from "@/lib/auction";
-import { estimateProfit, type HistorySummary } from "@/lib/auction/market";
+import {
+  estimateProfit,
+  OUTLIER_MEDIAN_FACTOR,
+  OUTLIER_TRIM,
+  type HistorySummary,
+} from "@/lib/auction/market";
 import { PERIODS, marketHref, type MarketQuery } from "@/lib/auction/period";
 import { qualityLabel } from "@/lib/auction/quality";
 import { formatDay, formatPrice } from "@/lib/format";
@@ -104,6 +109,14 @@ export function MarketHistory({
 
           {summary.from && summary.to ? (
             <p className="text-xs text-faint">{coverage(summary, days)}</p>
+          ) : null}
+
+          {summary.dropped > 0 ? (
+            <p className="text-xs text-faint">
+              Выбросы: не учтено {summary.dropped} сделок (верхние{" "}
+              {Math.round(OUTLIER_TRIM * 100)}% и цены выше{" "}
+              {OUTLIER_MEDIAN_FACTOR}× медианы).
+            </p>
           ) : null}
 
           <PriceChart points={summary.series} />

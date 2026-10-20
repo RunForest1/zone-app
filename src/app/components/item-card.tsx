@@ -5,18 +5,34 @@ import {
   rankLabel,
   type ItemSummary,
 } from "@/lib/items/catalog";
+import { FavoriteButton } from "./favorite-button";
 import { ItemIcon } from "./item-icon";
 
 // Карточка предмета. Рамка и мягкое свечение — в цвет ранга предмета.
-export function ItemCard({ item }: { item: ItemSummary }) {
+// Звёздочка — переключатель избранного.
+export function ItemCard({
+  item,
+  favorite,
+}: {
+  item: ItemSummary;
+  favorite: boolean;
+}) {
   const color = rankColor(item.color);
 
   return (
     <Link
       href={`/items/${item.id}`}
       style={{ borderColor: color, boxShadow: `0 2px 14px -2px ${color}80` }}
-      className="flex flex-col gap-3 rounded-xl border bg-surface p-3 transition-transform hover:-translate-y-0.5"
+      className="relative flex flex-col gap-3 rounded-xl border bg-surface p-3 transition-transform hover:-translate-y-0.5"
     >
+      <FavoriteButton
+        itemId={item.id}
+        favorite={favorite}
+        className={`absolute right-2 top-2 z-10 text-lg leading-none ${
+          favorite ? "text-accent" : "text-faint hover:text-accent"
+        }`}
+      />
+
       <div className="flex h-24 items-center justify-center rounded-lg bg-surface-muted/60">
         <ItemIcon src={item.icon} alt={item.name} size={72} />
       </div>

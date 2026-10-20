@@ -6,12 +6,12 @@ import {
   markAlertEventSent,
   type PendingAlertEvent,
 } from "@/lib/db/alerts";
-import { saleByKey } from "@/lib/db/sales";
+import { isFavorite, saleByKey } from "@/lib/db/sales";
 import { itemName } from "@/lib/items/catalog";
 import { itemsDatabase } from "@/lib/items/store";
 import { registerCommands } from "./commands";
 import { formatAlertMessage } from "./format";
-import { registerMenu } from "./menu";
+import { registerMenu, favoriteKeyboard } from "./menu";
 import { buildProxyFetch } from "./proxy";
 
 // Процесс bot: принимает команды (long polling) и рассылает уведомления,
@@ -130,8 +130,12 @@ async function sendAlert(event: PendingAlertEvent): Promise<void> {
     DOMAIN,
   );
 
+  // Кнопка «в избранное» — состояние на момент отправки.
+  const favorite = await isFavorite(event.itemId).catch(() => false);
+
   await bot.api.sendMessage(event.alertChat.telegramChatId, text, {
     parse_mode: "HTML",
+    reply_markup: favoriteKeyboard(event.itemId, favorite),
   });
   await markAlertEventSent(event.id);
 }
@@ -172,6 +176,8 @@ async function main() {
       { command: "filter", description: "изменить фильтр текстом" },
       { command: "pause", description: "поставить на паузу" },
       { command: "resume", description: "возобновить" },
+      { command: "track", description: "добавить предмет в избранное по id" },
+      { command: "untrack", description: "убрать предмет из избранного по id" },
       { command: "chatid", description: "показать id чата" },
     ])
     .catch((error) =>

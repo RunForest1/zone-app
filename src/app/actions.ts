@@ -1,13 +1,16 @@
 "use server";
 
-import { trackItem as trackItemInDb } from "@/lib/db/sales";
+import { setFavorite } from "@/lib/db/sales";
 
-// Помечает предмет отслеживаемым: воркер начнёт следить за его историей.
-// Вызывается при открытии карточки предмета.
-export async function trackItem(itemId: string): Promise<void> {
+// Переключает избранное: избранные предметы воркер синкает постоянно,
+// и в каталоге они идут первыми.
+export async function toggleFavorite(
+  itemId: string,
+  favorite: boolean,
+): Promise<void> {
   if (!itemId) {
     return;
   }
 
-  await trackItemInDb(itemId);
+  await setFavorite(itemId, favorite);
 }
