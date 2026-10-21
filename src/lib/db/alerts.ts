@@ -17,7 +17,7 @@ export interface AlertChatPatch {
   active?: boolean;
 }
 
-// Все активные чаты (по ним воркер проверяет новые сделки).
+// Все активные чаты (по ним воркер ищет выгодные лоты).
 export async function listActiveAlertChats(): Promise<AlertChat[]> {
   return prisma.alertChat.findMany({
     where: { active: true },
@@ -37,28 +37,21 @@ export async function upsertAlertChat(
   });
 }
 
-// Отправлялось ли уже этой чату уведомление по этой сделке.
-export async function wasAlertSent(
-  alertChatId: string,
-  saleKey: string,
-): Promise<boolean> {
-  const event = await prisma.alertEvent.findUnique({
-    where: { alertChatId_saleKey: { alertChatId, saleKey } },
-    select: { id: true },
-  });
-
-  return event !== null;
-}
-
 // Ставит уведомление в очередь (создаёт AlertEvent).
-// Дубликат по (alertChatId, saleKey) пропускается — как saveSales по Sale.key.
+// Дубликат по (alertChatId, lotKey) пропускается: лот уведомляем один раз.
 // Возвращает true, если событие действительно создано.
 export async function markAlertSent(input: {
   alertChatId: string;
   itemId: string;
-  saleKey: string;
+  lotKey: string;
+  quality: number | null;
+  point: number;
+  lotPrice: bigint;
+  average: bigint | null;
   profit: bigint;
   margin: number | null;
+  lotStart: Date | null;
+  lotEnd: Date | null;
   lastPrice: bigint | null;
   stats: Prisma.InputJsonValue;
 }): Promise<boolean> {

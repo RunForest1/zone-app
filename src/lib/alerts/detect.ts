@@ -1,15 +1,15 @@
 import type { AlertChat } from "@prisma/client";
 import type { FlipEstimate } from "./profit";
 
-// Оценка сделки против фильтров чатов. Чистая функция: ничего не знает
-// ни про Telegram, ни про БД — только решает, кому подходит сделка.
+// Оценка лота против фильтров чатов. Чистая функция: ничего не знает
+// ни про Telegram, ни про БД — только решает, кому подходит лот.
 // Прибыль/маржу считает вызывающий (estimateFlip), здесь — фильтры и пороги.
 
-// Что нужно знать о сделке для проверки фильтров.
-export interface DealInput {
-  // Качество сделки (у части предметов его нет).
+// Что нужно знать о лоте для проверки фильтров.
+export interface LotInput {
+  // Качество лота (у части предметов его нет).
   quality: number | null;
-  // Точка сделки; отсутствующая считается нулём (как на странице).
+  // Точка лота; отсутствующая считается нулём (как на странице).
   point: number;
   // Категория предмета (полный путь, например "weapon/assault_rifle").
   category: string;
@@ -17,8 +17,8 @@ export interface DealInput {
   rank: string;
 }
 
-// Сделка, прошедшая фильтры конкретного чата.
-export interface DealAlert {
+// Лот, прошедший фильтры конкретного чата.
+export interface LotAlert {
   chat: AlertChat;
   // Прибыль в игровой валюте (целая, поэтому BigInt — как деньги в схеме).
   profit: bigint;
@@ -36,36 +36,33 @@ function normalizedRank(rank: string): string {
   return rank || "DEFAULT";
 }
 
-// Подходит ли сделка фильтрам чата (активность, качество, точка, раздел, ранг).
+// Подходит ли лот фильтрам чата (активность, качество, точка, раздел, ранг).
 // Пустой список = без ограничения; отсутствующее качество под непустой
 // список качеств не подходит.
-export function matchFilters(deal: DealInput, chat: AlertChat): boolean {
+export function matchFilters(lot: LotInput, chat: AlertChat): boolean {
   if (!chat.active) {
     return false;
   }
 
   if (
     chat.qualities.length > 0 &&
-    (deal.quality === null || !chat.qualities.includes(deal.quality))
+    (lot.quality === null || !chat.qualities.includes(lot.quality))
   ) {
     return false;
   }
 
-  if (chat.points.length > 0 && !chat.points.includes(deal.point)) {
+  if (chat.points.length > 0 && !chat.points.includes(lot.point)) {
     return false;
   }
 
   if (
     chat.categories.length > 0 &&
-    !chat.categories.includes(topCategory(deal.category))
+    !chat.categories.includes(topCategory(lot.category))
   ) {
     return false;
   }
 
-  if (
-    chat.ranks.length > 0 &&
-    !chat.ranks.includes(normalizedRank(deal.rank))
-  ) {
+  if (chat.ranks.length > 0 && !chat.ranks.includes(normalizedRank(lot.rank))) {
     return false;
   }
 
@@ -97,16 +94,16 @@ export function matchThreshold(
   return profit;
 }
 
-// Все чаты, которым подходит сделка.
+// Все чаты, которым подходит лот.
 export function detectAlerts(
-  deal: DealInput,
+  lot: LotInput,
   chats: AlertChat[],
   estimate: FlipEstimate,
-): DealAlert[] {
-  const matches: DealAlert[] = [];
+): LotAlert[] {
+  const matches: LotAlert[] = [];
 
   for (const chat of chats) {
-    if (!matchFilters(deal, chat)) {
+    if (!matchFilters(lot, chat)) {
       continue;
     }
 

@@ -7,6 +7,10 @@ import { MARKET_FEE } from "@/lib/auction/market";
 // Периоды рынка в сообщении (дней).
 export const ALERT_PERIODS = [7, 14, 30];
 
+// Минимум сделок в срезе (качество + точка), чтобы считать среднюю надёжной.
+// Если сделок меньше — лот пропускаем (средняя по 1–2 сделкам ни о чём).
+export const SCAN_MIN_SALES = Number(process.env.SCAN_MIN_SALES ?? 3);
+
 // Рынок за один период: считается по совершённым сделкам.
 export interface PeriodStats {
   days: number;

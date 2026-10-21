@@ -3,14 +3,17 @@ import { qualityLabel } from "@/lib/auction/quality";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { rankLabel } from "@/lib/items/catalog";
 
-// Данные для сообщения о выгодной сделке.
+// Данные для сообщения о выгодном лоте.
 export interface AlertMessage {
   itemId: string;
   name: string;
   // Ранг предмета (значение из RANK_OPTIONS).
   rank: string;
-  // Цена этой сделки.
-  price: number;
+  // Цена лота (выкуп) — за сколько можно купить сейчас.
+  lotPrice: number;
+  // Начало и окончание лота (ISO-строки, показываем по Москве).
+  lotStart: string | null;
+  lotEnd: string | null;
   // Цена последней совершённой сделки по тому же качеству/точке.
   lastPrice: number | null;
   // Прибыль нетто (после комиссии) и маржа от средней.
@@ -20,8 +23,6 @@ export interface AlertMessage {
   point: number | null;
   // Рынок за периоды (7/14/30 дней).
   periods: PeriodStats[];
-  // Время сделки (ISO-строка).
-  time: string;
 }
 
 // HTML-разметка Telegram: имена предметов могут содержать &, <, поэтому
@@ -58,42 +59,48 @@ function periodText(period: PeriodStats): string {
   ].join(" · ");
 }
 
-// Текст уведомления: цена сделки, последняя сделка, прибыль/маржа, признаки
+// Текст уведомления: цена лота, последняя сделка, прибыль/маржа, признаки
 // и рынок за 7/14/30 дней.
-export function formatAlertMessage(deal: AlertMessage, domain: string): string {
+export function formatAlertMessage(lot: AlertMessage, domain: string): string {
   const lines = [
-    "🔥 <b>Выгодная сделка</b>",
+    "🔥 <b>Выгодный лот</b>",
     "",
-    `<a href="${domain}/items/${deal.itemId}">${escapeHtml(deal.name)}</a>`,
-    `Ранг: ${rankLabel(deal.rank)}`,
-    `Цена сделки: <b>${formatPrice(deal.price)}</b>`,
+    `<a href="${domain}/items/${lot.itemId}">${escapeHtml(lot.name)}</a>`,
+    `Ранг: ${rankLabel(lot.rank)}`,
+    `Цена лота (выкуп): <b>${formatPrice(lot.lotPrice)}</b>`,
   ];
 
-  if (deal.lastPrice !== null) {
-    lines.push(`Последняя сделка: ${formatPrice(deal.lastPrice)}`);
+  if (lot.lotStart !== null) {
+    lines.push(`Начало лота: ${formatDateTime(lot.lotStart)}`);
+  }
+
+  if (lot.lotEnd !== null) {
+    lines.push(`Окончание лота: ${formatDateTime(lot.lotEnd)}`);
+  }
+
+  if (lot.lastPrice !== null) {
+    lines.push(`Последняя сделка: ${formatPrice(lot.lastPrice)}`);
   }
 
   lines.push(
-    `Прибыль (после 5%): <b>${formatPrice(deal.profit)}</b> (${marginText(deal.margin)})`,
+    `Прибыль (после 5%): <b>${formatPrice(lot.profit)}</b> (${marginText(lot.margin)})`,
   );
 
-  if (deal.quality !== null) {
-    lines.push(`Качество: ${qualityLabel(deal.quality)} (${deal.quality})`);
+  if (lot.quality !== null) {
+    lines.push(`Качество: ${qualityLabel(lot.quality)} (${lot.quality})`);
   }
 
-  if (deal.point !== null) {
-    lines.push(`Точка: ${deal.point}`);
+  if (lot.point !== null) {
+    lines.push(`Точка: ${lot.point}`);
   }
 
-  if (deal.periods.length > 0) {
-    lines.push("", `Рынок · ${sliceLabel(deal.quality, deal.point)}`);
+  if (lot.periods.length > 0) {
+    lines.push("", `Рынок · ${sliceLabel(lot.quality, lot.point)}`);
 
-    for (const period of deal.periods) {
+    for (const period of lot.periods) {
       lines.push(`${period.days} дней: ${periodText(period)}`);
     }
   }
-
-  lines.push("", formatDateTime(deal.time));
 
   return lines.join("\n");
 }

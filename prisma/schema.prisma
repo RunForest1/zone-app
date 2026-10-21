@@ -112,20 +112,28 @@ model AlertChat {
   events AlertEvent[]
 }
 
-// Уведомление о выгодной сделке: строка-очередь и лог отправки одновременно.
+// Уведомление о выгодном лоте: строка-очередь и лог отправки одновременно.
 // sentAt = null — событие ещё не отправлено (его берёт процесс bot).
 model AlertEvent {
   id          String    @id @default(cuid())
   alertChatId String
   alertChat   AlertChat @relation(fields: [alertChatId], references: [id], onDelete: Cascade)
 
-  // id предмета (как в ItemsDatabase) и ключ сделки из Sale.key.
-  itemId  String
-  saleKey String
+  // id предмета (как в ItemsDatabase) и ключ лота (дедуп: лот шлём один раз).
+  itemId String
+  lotKey String
 
-  // Прибыль и маржа, посчитанные детектором воркера.
-  profit BigInt
-  margin Float?
+  // Сам лот и расчёт на момент скана.
+  quality  Int?
+  point    Int
+  lotPrice BigInt
+  average  BigInt?
+  profit   BigInt
+  margin   Float?
+
+  // Начало и окончание лота — в сообщении показываем по Москве.
+  lotStart DateTime?
+  lotEnd   DateTime?
 
   // Цена последней сделки по тому же качеству/точке и рынок за периоды:
   // массив { days, average, median, deals } (7/14/30 дней).
@@ -136,8 +144,8 @@ model AlertEvent {
   sentAt    DateTime?
   createdAt DateTime  @default(now())
 
-  // Одна и та же сделка не шлётся чату дважды.
-  @@unique([alertChatId, saleKey])
+  // Один и тот же лот не шлётся чату дважды.
+  @@unique([alertChatId, lotKey])
   @@index([itemId])
   @@index([sentAt])
 }

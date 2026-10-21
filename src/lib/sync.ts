@@ -4,17 +4,12 @@ import {
   INCREMENT_PAGES,
   getSzApi,
 } from "@/lib/auction";
-import { checkAlerts } from "@/lib/alerts";
 import { prisma } from "@/lib/db";
-import {
-  ensureItem,
-  freshSales,
-  latestSaleTime,
-  saveSales,
-} from "@/lib/db/sales";
+import { ensureItem, latestSaleTime, saveSales } from "@/lib/db/sales";
 
 // Синхронизация истории предмета: используется и воркером (по избранному),
-// и страницей предмета (подтягивание по открытию).
+// и страницей предмета (подтягивание по открытию). Алерты к сделкам не относятся
+// — они считаются по активным лотам (см. `scanLots` в `@/lib/alerts`).
 
 // Глубина разового backfill при первом появлении предмета (дней).
 const BACKFILL_DAYS = Number(
@@ -66,9 +61,6 @@ export async function syncItem(
       since,
       maxPages,
     );
-    // Новые сделки для алертов определяем до сохранения (пока их нет в БД).
-    // На backfill уведомления не шлём — иначе зальём чат историей за 30 дней.
-    const fresh = isBackfill ? [] : await freshSales(itemId, points);
     const added = await saveSales(itemId, points);
     const newest =
       points.length > 0 ? new Date(points[points.length - 1].time) : lastSale;
@@ -108,20 +100,6 @@ export async function syncItem(
         message: isBackfill ? "backfill" : null,
       },
     });
-
-    // Ставим в очередь уведомления о новых выгодных сделках.
-    // Сбой алертов не должен ломать синхронизацию сделок.
-    if (fresh.length > 0) {
-      try {
-        const queued = await checkAlerts(itemId, fresh);
-
-        if (queued > 0) {
-          log(`${itemId}: уведомлений в очередь: ${queued}`);
-        }
-      } catch (error) {
-        log(`${itemId}: алерты не удались — ${errorText(error)}`);
-      }
-    }
 
     log(`${itemId}: +${added} сделок${isBackfill ? " (backfill)" : ""}`);
 

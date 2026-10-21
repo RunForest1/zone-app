@@ -6,7 +6,7 @@ import {
   markAlertEventSent,
   type PendingAlertEvent,
 } from "@/lib/db/alerts";
-import { isFavorite, saleByKey } from "@/lib/db/sales";
+import { isFavorite } from "@/lib/db/sales";
 import { itemName } from "@/lib/items/catalog";
 import { itemsDatabase } from "@/lib/items/store";
 import { registerCommands } from "./commands";
@@ -104,11 +104,9 @@ bot.catch((err) => {
 // Отправка одного уведомления.
 async function sendAlert(event: PendingAlertEvent): Promise<void> {
   const item = itemsDatabase.items[event.itemId];
-  const sale = await saleByKey(event.saleKey);
 
-  // Показывать нечего (предмет или сделка уже удалены) — помечаем
-  // отправленным, чтобы не пытаться бесконечно.
-  if (!item || !sale) {
+  // Предмет пропал из базы — показывать нечего, помечаем отправленным.
+  if (!item) {
     await markAlertEventSent(event.id);
     return;
   }
@@ -118,14 +116,15 @@ async function sendAlert(event: PendingAlertEvent): Promise<void> {
       itemId: event.itemId,
       name: itemName(item),
       rank: item.color,
-      price: sale.price,
+      lotPrice: Number(event.lotPrice),
+      lotStart: event.lotStart?.toISOString() ?? null,
+      lotEnd: event.lotEnd?.toISOString() ?? null,
       lastPrice: event.lastPrice === null ? null : Number(event.lastPrice),
       profit: Number(event.profit),
       margin: event.margin,
-      quality: sale.quality,
-      point: sale.point,
+      quality: event.quality,
+      point: event.point,
       periods: readPeriods(event.stats),
-      time: sale.time,
     },
     DOMAIN,
   );
